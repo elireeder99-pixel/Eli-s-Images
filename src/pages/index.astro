@@ -117,18 +117,23 @@ const cats = [...new Set(photos.map((p) => p.cat).filter(Boolean))];
     ["The best time to plant a tree was twenty years ago. The second best time is now.", "Proverb"],
 
   ];
-  const q = document.getElementById('q');
+    const q = document.getElementById('q');
   const qa = document.getElementById('qa');
-  let last = -1;
-  const next = () => {
-    let i;
-    do { i = Math.floor(Math.random() * QUOTES.length); } while (i === last && QUOTES.length > 1);
-    last = i;
-    q.textContent = QUOTES[i][0];
-    qa.textContent = QUOTES[i][1];
+  const SLOT = 5 * 60 * 1000;
+  const show = (i) => { q.textContent = QUOTES[i][0]; qa.textContent = QUOTES[i][1]; };
+  const hash = (n) => { n = Math.imul(n ^ (n >>> 15), 2246822507); n = Math.imul(n ^ (n >>> 13), 3266489909); return (n ^ (n >>> 16)) >>> 0; };
+  const pick = (slot) => {
+    const i = hash(slot) % QUOTES.length;
+    return i === hash(slot - 1) % QUOTES.length ? (i + 1) % QUOTES.length : i;
   };
-  document.getElementById('qn').addEventListener('click', next);
-  next();
+  let slot = Math.floor(Date.now() / SLOT);
+  show(pick(slot));
+  setInterval(() => {
+    const now = Math.floor(Date.now() / SLOT);
+    if (now !== slot) { slot = now; show(pick(now)); }
+  }, 30000);
+  document.getElementById('qn').addEventListener('click', () => show(Math.floor(Math.random() * QUOTES.length)));
+
 </script>
 
   <style is:global>
