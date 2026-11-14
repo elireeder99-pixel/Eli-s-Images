@@ -44,7 +44,7 @@ const cats = [...new Set(photos.map((p) => p.cat).filter(Boolean))];
       <button data-f="all" aria-pressed="true">All</button>
       {cats.map((c) => <button data-f={c} aria-pressed="false">{c[0].toUpperCase() + c.slice(1)}</button>)}
     </div>
-  header{padding:56px 24px 28px;max-width:1200px;margin:0 auto;display:flex;flex-direction:column;align-items:center;gap:24px;text-align:center}
+ 
 
   <main id="grid">
     {photos.map((p) => (
@@ -98,7 +98,7 @@ const cats = [...new Set(photos.map((p) => p.cat).filter(Boolean))];
     :root{--bg:#2a2f33;--surface:#343a3f;--text:#e9e9e6;--muted:#9aa2a8;--accent:#8fc7bd;--line:#454d54}
     *{box-sizing:border-box}
     body{margin:0;background:var(--bg);color:var(--text);font:400 16px/1.5 Figtree,system-ui,sans-serif}
-    header{padding:56px 24px 28px;max-width:1200px;margin:0 auto;display:flex;flex-wrap:wrap;gap:20px;align-items:end;justify-content:space-between}
+     header{padding:56px 24px 28px;max-width:1200px;margin:0 auto;display:flex;flex-direction:column;align-items:center;gap:24px;text-align:center}
     h1{font:italic 400 clamp(40px,8vw,84px)/1 Newsreader,Georgia,serif;margin:0;letter-spacing:-.02em}
     .sub{color:var(--muted);margin:10px auto 0;max-width:44ch}
     .tools{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
