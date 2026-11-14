@@ -42,7 +42,6 @@ const cats = [...new Set(photos.map((p) => p.cat).filter(Boolean))];
 <figure class="quote">
   <blockquote id="q">The best camera is the one that's with you.</blockquote>
   <figcaption id="qa">Chase Jarvis</figcaption>
-  <button id="qn" type="button">New quote</button>
 </figure>
 
     </div>
@@ -132,7 +131,6 @@ const cats = [...new Set(photos.map((p) => p.cat).filter(Boolean))];
     const now = Math.floor(Date.now() / SLOT);
     if (now !== slot) { slot = now; show(pick(now)); }
   }, 30000);
-  document.getElementById('qn').addEventListener('click', () => show(Math.floor(Math.random() * QUOTES.length)));
 
 </script>
 
