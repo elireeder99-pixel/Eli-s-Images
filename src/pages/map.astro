@@ -3,6 +3,7 @@ import { getImage } from 'astro:assets';
 import { feature } from 'topojson-client';
 import { geoNaturalEarth1, geoPath } from 'd3-geo';
 import world from 'world-atlas/countries-110m.json';
+import countryData from 'world-countries';
 
 const TITLE = 'Where I\u2019ve been';
 
@@ -16,6 +17,16 @@ const ALIASES = {
 };
 const norm = (s) => s.toLowerCase().replace(/^\d+[-_ ]*/, '').replace(/[^a-z]/g, '');
 const nice = (s) => s.replace(/\.[^.]+$/, '').replace(/^\d+[-_ ]*/, '').replace(/[-_]+/g, ' ').trim();
+
+const CONT = {};
+for (const c of countryData) {
+  if (!c.ccn3) continue;
+  let r = c.region;
+  if (r === 'Americas') r = c.subregion === 'South America' ? 'South America' : 'North America';
+  if (!r || r === 'Antarctic') continue;
+  CONT[c.ccn3] = r;
+}
+const FALLBACK = { Kosovo: 'Europe', 'N. Cyprus': 'Europe', Somaliland: 'Africa' };
 
 const countries = feature(world, world.objects.countries).features.filter((f) => f.id !== '010');
 const path = geoPath(geoNaturalEarth1().fitSize([960, 500], { type: 'Sphere' }));
@@ -44,10 +55,13 @@ for (const c of countries) {
       return { t: p.title, th: t.src, f: f.src };
     }));
     idx = places.length;
-    places.push({ name: c.properties.name, photos });
+    places.push({ name: c.properties.name, continent: CONT[c.id] || FALLBACK[c.properties.name] || '', photos });
   }
   shapes.push({ d: path(c), name: c.properties.name, idx });
 }
+const continents = [...new Set(places.map((p) => p.continent).filter(Boolean))].sort();
+const photoCount = places.reduce((n, p) => n + p.photos.length, 0);
+const pct = Math.round((places.length / 195) * 100);
 ---
 <!doctype html>
 <html lang="en">
@@ -61,17 +75,32 @@ for (const c of countries) {
   <header>
     <a class="back" href="/">&larr; Gallery</a>
     <h1>{TITLE}</h1>
-    <p class="sub">{places.length} {places.length === 1 ? 'country' : 'countries'}. Tap a highlighted one to see photos.</p>
+    <p class="sub">Tap a highlighted country to see photos. Pinch or scroll to zoom.</p>
   </header>
 
   <main>
-    <svg viewBox="0 0 960 500" role="img" aria-label="World map">
+    <section class="stats">
+      <div><b>{places.length}</b><span>{places.length === 1 ? 'country' : 'countries'}</span></div>
+      <div><b>{continents.length}</b><span>of 6 continents</span></div>
+      <div><b>{photoCount}</b><span>photos</span></div>
+      <div><b>{pct}%</b><span>of the world</span></div>
+    </section>
+    {continents.length > 0 && <p class="conts">{continents.join(' \u00b7 ')}</p>}
+
+    <div class="mapwrap">
+    <svg id="map" viewBox="0 0 960 500" role="img" aria-label="World map">
       {shapes.map((s) => (
         s.idx >= 0
           ? <path d={s.d} class="visited" data-i={s.idx} tabindex="0" role="button" aria-label={s.name}><title>{s.name}</title></path>
           : <path d={s.d} class="land"><title>{s.name}</title></path>
       ))}
     </svg>
+    <div class="zoom">
+      <button id="zin" type="button" aria-label="Zoom in">+</button>
+      <button id="zout" type="button" aria-label="Zoom out">&minus;</button>
+      <button id="zreset" type="button" aria-label="Reset view">Reset</button>
+    </div>
+    </div>
 
     <section id="panel" hidden>
       <h2 id="pname"></h2>
@@ -98,6 +127,7 @@ for (const c of countries) {
     const img = document.getElementById('lbimg');
     const cap = document.getElementById('lbcap');
     let p = 0, i = 0;
+    let dragged = false;
 
     const show = () => { const ph = places[p].photos[i]; img.src = ph.f; img.alt = ph.t; cap.textContent = ph.t + '  (' + (i + 1) + '/' + places[p].photos.length + ')'; };
     const step = (d) => { const n = places[p].photos.length; i = (i + d + n) % n; show(); };
@@ -121,7 +151,7 @@ for (const c of countries) {
     };
 
     document.querySelectorAll('.visited').forEach((el) => {
-      el.addEventListener('click', () => openPlace(Number(el.dataset.i)));
+      el.addEventListener('click', () => { if (!dragged) openPlace(Number(el.dataset.i)); });
       el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPlace(Number(el.dataset.i)); } });
     });
     document.getElementById('close').onclick = close;
@@ -134,6 +164,67 @@ for (const c of countries) {
       if (e.key === 'ArrowLeft') step(-1);
       if (e.key === 'ArrowRight') step(1);
     });
+
+    const svg = document.getElementById('map');
+    const W = 960, H = 500, MAXZ = 8;
+    let vb = { x: 0, y: 0, w: W, h: H };
+    const apply = () => svg.setAttribute('viewBox', vb.x + ' ' + vb.y + ' ' + vb.w + ' ' + vb.h);
+    const clampVB = () => {
+      vb.w = Math.min(W, Math.max(W / MAXZ, vb.w));
+      vb.h = vb.w * H / W;
+      vb.x = Math.min(W - vb.w, Math.max(0, vb.x));
+      vb.y = Math.min(H - vb.h, Math.max(0, vb.y));
+    };
+    const zoomAt = (factor, cx, cy) => {
+      const r = svg.getBoundingClientRect();
+      const fx = (cx - r.left) / r.width, fy = (cy - r.top) / r.height;
+      const px = vb.x + fx * vb.w, py = vb.y + fy * vb.h;
+      vb.w *= factor; clampVB();
+      vb.x = px - fx * vb.w; vb.y = py - fy * vb.h;
+      clampVB(); apply();
+    };
+    const panBy = (dx, dy) => {
+      const r = svg.getBoundingClientRect();
+      vb.x -= dx * vb.w / r.width; vb.y -= dy * vb.h / r.height;
+      clampVB(); apply();
+    };
+
+    const ptrs = new Map();
+    let prevDist = 0, prevCx = 0, prevCy = 0, startX = 0, startY = 0;
+    const pinch = () => {
+      const a = [...ptrs.values()];
+      if (a.length < 2) return null;
+      return { d: Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y), cx: (a[0].x + a[1].x) / 2, cy: (a[0].y + a[1].y) / 2 };
+    };
+    svg.addEventListener('pointerdown', (e) => {
+      ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (ptrs.size === 1) { dragged = false; startX = e.clientX; startY = e.clientY; }
+      const n = pinch();
+      if (n) { prevDist = n.d; prevCx = n.cx; prevCy = n.cy; dragged = true; }
+    });
+    window.addEventListener('pointermove', (e) => {
+      if (!ptrs.has(e.pointerId)) return;
+      const old = ptrs.get(e.pointerId);
+      ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (ptrs.size === 1) {
+        if (!dragged && Math.hypot(e.clientX - startX, e.clientY - startY) > 6) dragged = true;
+        if (dragged) panBy(e.clientX - old.x, e.clientY - old.y);
+      } else if (ptrs.size === 2) {
+        const n = pinch();
+        if (prevDist) zoomAt(prevDist / n.d, n.cx, n.cy);
+        panBy(n.cx - prevCx, n.cy - prevCy);
+        prevDist = n.d; prevCx = n.cx; prevCy = n.cy;
+      }
+    });
+    const endPtr = (e) => { ptrs.delete(e.pointerId); prevDist = 0; };
+    window.addEventListener('pointerup', endPtr);
+    window.addEventListener('pointercancel', endPtr);
+    svg.addEventListener('wheel', (e) => { e.preventDefault(); zoomAt(Math.exp(e.deltaY * 0.0015), e.clientX, e.clientY); }, { passive: false });
+
+    const mid = () => { const r = svg.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
+    document.getElementById('zin').onclick = () => zoomAt(0.6, ...mid());
+    document.getElementById('zout').onclick = () => zoomAt(1 / 0.6, ...mid());
+    document.getElementById('zreset').onclick = () => { vb = { x: 0, y: 0, w: W, h: H }; apply(); };
   </script>
 
   <style is:global>
@@ -147,8 +238,18 @@ for (const c of countries) {
     .sub{color:var(--muted);margin:8px auto 0}
     main{max-width:1200px;margin:0 auto;padding:0 24px 80px}
     svg{display:block;width:100%;height:auto}
-    .land{fill:var(--surface);stroke:var(--bg);stroke-width:.6}
-    .visited{fill:var(--accent);stroke:var(--bg);stroke-width:.6;cursor:pointer;transition:fill .15s}
+    .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:0 0 14px;text-align:center}
+    .stats b{display:block;font:italic 400 clamp(26px,5vw,42px)/1 Newsreader,Georgia,serif;color:var(--accent)}
+    .stats span{color:var(--muted);font-size:13px}
+    .conts{text-align:center;color:var(--muted);font-size:14px;margin:0 0 18px}
+    .mapwrap{position:relative}
+    #map{touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none}
+    #map:active{cursor:grabbing}
+    .land,.visited{vector-effect:non-scaling-stroke}
+    .zoom{position:absolute;right:8px;top:8px;display:flex;flex-direction:column;gap:6px}
+    .zoom button{background:rgba(30,34,37,.8);padding:6px 12px;min-width:44px}
+    .land{fill:var(--surface);stroke:var(--bg);stroke-width:.5}
+    .visited{fill:var(--accent);stroke:var(--bg);stroke-width:.5;cursor:pointer;transition:fill .15s}
     .visited:hover,.visited.on{fill:#c3e4dd}
     .visited:focus-visible{outline:2px solid #fff}
     #panel{margin-top:28px;scroll-margin-top:16px}
