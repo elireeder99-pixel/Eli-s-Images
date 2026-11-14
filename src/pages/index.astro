@@ -131,7 +131,7 @@ const data = photos.map((p) => ({ t: p.title, f: p.full }));
   </script>
 
   <style is:global>
-    :root{--bg:#2a2f33;--surface:#343a3f;--text:#e9e9e6;--muted:#9aa2a8;--accent:#8fc7bd;--line:#454d54;--rh:240px}
+    :root{--bg:#2a2f33;--surface:#343a3f;--text:#e9e9e6;--muted:#9aa2a8;--accent:#8fc7bd;--line:#454d54;--rh:400px}
     *{box-sizing:border-box}
     body{margin:0;background:var(--bg);color:var(--text);font:400 16px/1.5 Figtree,system-ui,sans-serif}
     header{padding:56px 24px 28px;max-width:1200px;margin:0 auto;display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center}
@@ -145,7 +145,7 @@ const data = photos.map((p) => ({ t: p.title, f: p.full }));
     button:hover{border-color:var(--accent)}
     button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
     main{max-width:1400px;margin:0 auto;padding:0 12px 80px}
-    .mosaic{display:flex;flex-wrap:wrap;gap:6px;list-style:none;margin:0;padding:0}
+    .mosaic{display:flex;flex-wrap:wrap;gap:15px;list-style:none;margin:0;padding:0}
     .mosaic::after{content:'';flex-grow:999999}
     .mosaic li{height:var(--rh);width:calc(var(--r) * var(--rh));min-width:0}
     .ph{position:relative;display:block;width:100%;height:100%;padding:0;border:0;border-radius:2px;overflow:hidden;background:var(--surface);cursor:zoom-in}
