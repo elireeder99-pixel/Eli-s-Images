@@ -1,0 +1,171 @@
+---
+import { getImage } from 'astro:assets';
+import { feature } from 'topojson-client';
+import { geoNaturalEarth1, geoPath } from 'd3-geo';
+import world from 'world-atlas/countries-110m.json';
+
+const TITLE = 'Where I\u2019ve been';
+
+// Folder names in src/travel/ become pins. Spelling just needs to match the country (case and dashes ignored).
+// Add shortcuts here if a country's map name differs from what you'd type.
+const ALIASES = {
+  usa: 'unitedstatesofamerica', us: 'unitedstatesofamerica', unitedstates: 'unitedstatesofamerica',
+  uk: 'unitedkingdom', england: 'unitedkingdom', scotland: 'unitedkingdom',
+  czechrepublic: 'czechia', bosnia: 'bosniaandherz', dominicanrepublic: 'dominicanrep',
+  uae: 'unitedarabemirates', ivorycoast: 'ctedivoire', cotedivoire: 'ctedivoire', northmacedonia: 'macedonia',
+};
+const norm = (s) => s.toLowerCase().replace(/^\d+[-_ ]*/, '').replace(/[^a-z]/g, '');
+const nice = (s) => s.replace(/\.[^.]+$/, '').replace(/^\d+[-_ ]*/, '').replace(/[-_]+/g, ' ').trim();
+
+const countries = feature(world, world.objects.countries).features.filter((f) => f.id !== '010');
+const path = geoPath(geoNaturalEarth1().fitSize([960, 500], { type: 'Sphere' }));
+
+const files = import.meta.glob('../travel/**/*.{jpg,jpeg,png,webp,JPG,JPEG,PNG,WEBP}', { eager: true });
+const entries = Object.entries(files).sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }));
+const byFolder = new Map();
+for (const [p, mod] of entries) {
+  const parts = p.replace('../travel/', '').split('/');
+  if (parts.length < 2) continue;
+  const key = ALIASES[norm(parts[0])] || norm(parts[0]);
+  if (!byFolder.has(key)) byFolder.set(key, []);
+  byFolder.get(key).push({ src: mod.default, title: nice(parts[parts.length - 1]) });
+}
+
+const unmatched = [...byFolder.keys()].filter((k) => !countries.some((c) => norm(c.properties.name) === k));
+const places = [];
+const shapes = [];
+for (const c of countries) {
+  const list = byFolder.get(norm(c.properties.name));
+  let idx = -1;
+  if (list) {
+    const photos = await Promise.all(list.map(async (p) => {
+      const t = await getImage({ src: p.src, width: 600, format: 'webp' });
+      const f = await getImage({ src: p.src, width: 2200, format: 'webp' });
+      return { t: p.title, th: t.src, f: f.src };
+    }));
+    idx = places.length;
+    places.push({ name: c.properties.name, photos });
+  }
+  shapes.push({ d: path(c), name: c.properties.name, idx });
+}
+---
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{TITLE}</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;1,6..72,400&family=Figtree:wght@400;500&display=swap" />
+</head>
+<body>
+  <header>
+    <a class="back" href="/">&larr; Gallery</a>
+    <h1>{TITLE}</h1>
+    <p class="sub">{places.length} {places.length === 1 ? 'country' : 'countries'}. Tap a highlighted one to see photos.</p>
+  </header>
+
+  <main>
+    <svg viewBox="0 0 960 500" role="img" aria-label="World map">
+      {shapes.map((s) => (
+        s.idx >= 0
+          ? <path d={s.d} class="visited" data-i={s.idx} tabindex="0" role="button" aria-label={s.name}><title>{s.name}</title></path>
+          : <path d={s.d} class="land"><title>{s.name}</title></path>
+      ))}
+    </svg>
+
+    <section id="panel" hidden>
+      <h2 id="pname"></h2>
+      <div id="pgrid"></div>
+    </section>
+    {unmatched.length > 0 && <p class="warn">No match on the map for folder: {unmatched.join(', ')}. Check the spelling.</p>}
+  </main>
+
+  <div id="lb" role="dialog" aria-modal="true" aria-label="Photo viewer">
+    <button id="close" aria-label="Close">Close</button>
+    <button class="nav" id="prev" aria-label="Previous">&lsaquo;</button>
+    <img id="lbimg" alt="" />
+    <p id="lbcap"></p>
+    <button class="nav" id="next" aria-label="Next">&rsaquo;</button>
+  </div>
+
+  <script type="application/json" id="place-data" set:html={JSON.stringify(places)} />
+
+  <script>
+    const places = JSON.parse(document.getElementById('place-data').textContent);
+    const panel = document.getElementById('panel');
+    const grid = document.getElementById('pgrid');
+    const lb = document.getElementById('lb');
+    const img = document.getElementById('lbimg');
+    const cap = document.getElementById('lbcap');
+    let p = 0, i = 0;
+
+    const show = () => { const ph = places[p].photos[i]; img.src = ph.f; img.alt = ph.t; cap.textContent = ph.t + '  (' + (i + 1) + '/' + places[p].photos.length + ')'; };
+    const step = (d) => { const n = places[p].photos.length; i = (i + d + n) % n; show(); };
+    const close = () => lb.classList.remove('on');
+
+    const openPlace = (n) => {
+      p = n;
+      document.getElementById('pname').textContent = places[n].name;
+      grid.innerHTML = '';
+      places[n].photos.forEach((ph, k) => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'ph'; b.setAttribute('aria-label', 'Open ' + ph.t);
+        const im = document.createElement('img'); im.src = ph.th; im.alt = ph.t; im.loading = 'lazy';
+        b.appendChild(im);
+        b.onclick = () => { i = k; show(); lb.classList.add('on'); document.getElementById('close').focus(); };
+        grid.appendChild(b);
+      });
+      panel.hidden = false;
+      document.querySelectorAll('.visited').forEach((el) => el.classList.toggle('on', Number(el.dataset.i) === n));
+      panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+
+    document.querySelectorAll('.visited').forEach((el) => {
+      el.addEventListener('click', () => openPlace(Number(el.dataset.i)));
+      el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPlace(Number(el.dataset.i)); } });
+    });
+    document.getElementById('close').onclick = close;
+    document.getElementById('prev').onclick = () => step(-1);
+    document.getElementById('next').onclick = () => step(1);
+    lb.addEventListener('click', (e) => { if (e.target === lb) close(); });
+    document.addEventListener('keydown', (e) => {
+      if (!lb.classList.contains('on')) return;
+      if (e.key === 'Escape') close();
+      if (e.key === 'ArrowLeft') step(-1);
+      if (e.key === 'ArrowRight') step(1);
+    });
+  </script>
+
+  <style is:global>
+    :root{--bg:#2a2f33;--surface:#343a3f;--text:#e9e9e6;--muted:#9aa2a8;--accent:#8fc7bd;--line:#454d54}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font:400 16px/1.5 Figtree,system-ui,sans-serif}
+    header{padding:40px 24px 20px;max-width:1200px;margin:0 auto;display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center}
+    .back{color:var(--muted);text-decoration:none;font-size:14px}
+    .back:hover{color:var(--accent)}
+    h1{font:italic 400 clamp(34px,7vw,64px)/1 Newsreader,Georgia,serif;margin:8px 0 0;letter-spacing:-.02em}
+    .sub{color:var(--muted);margin:8px auto 0}
+    main{max-width:1200px;margin:0 auto;padding:0 24px 80px}
+    svg{display:block;width:100%;height:auto}
+    .land{fill:var(--surface);stroke:var(--bg);stroke-width:.6}
+    .visited{fill:var(--accent);stroke:var(--bg);stroke-width:.6;cursor:pointer;transition:fill .15s}
+    .visited:hover,.visited.on{fill:#c3e4dd}
+    .visited:focus-visible{outline:2px solid #fff}
+    #panel{margin-top:28px;scroll-margin-top:16px}
+    #panel h2{font:italic 400 30px/1.2 Newsreader,Georgia,serif;margin:0 0 14px}
+    #pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}
+    .ph{padding:0;border:0;border-radius:3px;overflow:hidden;background:var(--surface);cursor:zoom-in;aspect-ratio:4/3}
+    .ph img{display:block;width:100%;height:100%;object-fit:cover}
+    .warn{color:#e8c07a;font-size:14px;margin-top:20px}
+    button{font:500 14px Figtree,sans-serif;color:var(--text);background:transparent;border:1px solid var(--line);border-radius:999px;padding:8px 16px;cursor:pointer}
+    button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+    #lb{position:fixed;inset:0;background:rgba(30,34,37,.97);display:none;flex-direction:column;align-items:center;justify-content:center;padding:24px;z-index:10}
+    #lb.on{display:flex}
+    #lb img{max-width:100%;max-height:82vh;border-radius:2px}
+    #lb p{font:italic 400 22px Newsreader,serif;margin:16px 0 0;text-align:center}
+    .nav{position:absolute;top:50%;transform:translateY(-50%);font-size:22px;width:44px;height:44px;padding:0}
+    #prev{left:12px}#next{right:12px}#close{position:absolute;top:14px;right:14px}
+    @media (max-width:600px){main{padding:0 12px 60px}#pgrid{grid-template-columns:repeat(2,1fr)}}
+  </style>
+</body>
+</html>
