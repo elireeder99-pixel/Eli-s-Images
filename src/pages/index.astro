@@ -2,7 +2,7 @@
 import { getImage } from 'astro:assets';
 
 const TITLE = 'EREED MEDIA';
-const SUBTITLE = 'WORDLWIDE.';
+const SUBTITLE = 'WORLDWIDE.';
 const FEATURE_EVERY = 7; // every Nth photo becomes a big tile
 
 // Every image in src/photos shows up automatically. The order is shuffled on every visit.
@@ -19,8 +19,8 @@ const photos = await Promise.all(entries.map(async ([path, mod]) => {
     thumb: thumb.src,
     full: full.src,
     ratio,
-    cw: ratio >= 1.4 ? 2 : 1,
-    rh: ratio <= 0.8 ? 2 : 1,
+    cw: ratio >= 1.15 ? 2 : 1,
+    rh: 1,
   };
 }));
 ---
@@ -40,7 +40,7 @@ const photos = await Promise.all(entries.map(async ([path, mod]) => {
     <p class="sub">{SUBTITLE}</p>
     <a class="mapbtn" href="/globe">
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3z"/></svg>
-      World map
+      GLOBE
     </a>
   </header>
 
@@ -82,10 +82,11 @@ const photos = await Promise.all(entries.map(async ([path, mod]) => {
     tiles.forEach((el, n) => {
       grid.appendChild(el);
       const r = Number(el.dataset.ratio);
+      // Landscape photos get wide tiles, portrait and square photos get upright tiles.
+      const feature = n % every === 0;
       let cw = 1, rh = 1;
-      if (n % every === 0) { cw = 2; rh = 2; }
-      else if (r >= 1.4) { cw = 2; }
-      else if (r <= 0.8) { rh = 2; }
+      if (r >= 1.15) { cw = feature ? 4 : 2; rh = feature ? 2 : 1; }
+      else { cw = feature ? 2 : 1; rh = feature ? 2 : 1; }
       el.style.gridColumn = 'span ' + cw;
       el.style.gridRow = 'span ' + rh;
     });
@@ -172,7 +173,7 @@ const photos = await Promise.all(entries.map(async ([path, mod]) => {
     button:hover{border-color:var(--accent)}
     button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
     main{max-width:1400px;margin:0 auto;padding:0 12px 56px;container-type:inline-size}
-    .puzzle{--cols:6;--gap:6px;visibility:hidden;display:grid;grid-template-columns:repeat(var(--cols),minmax(0,1fr));grid-auto-rows:calc((100cqw - (var(--cols) - 1) * var(--gap)) / var(--cols));grid-auto-flow:dense;gap:var(--gap)}
+    .puzzle{--cols:6;--gap:6px;visibility:hidden;display:grid;grid-template-columns:repeat(var(--cols),minmax(0,1fr));grid-auto-rows:calc((100cqw - (var(--cols) - 1) * var(--gap)) / var(--cols) * 1.3);grid-auto-flow:dense;gap:var(--gap)}
     .puzzle.ready{visibility:visible}
     .ph{position:relative;display:block;width:100%;height:100%;padding:0;border:0;border-radius:2px;overflow:hidden;background:var(--surface);cursor:zoom-in}
     .ph img{display:block;width:100%;height:100%;object-fit:cover}
