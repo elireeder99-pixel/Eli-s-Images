@@ -1,0 +1,257 @@
+---
+import { getImage } from 'astro:assets';
+import sharp from 'sharp';
+import path from 'node:path';
+
+const TITLE = 'By colour';
+const SUBTITLE = 'Every photo, sorted by its dominant colour.';
+
+const files = import.meta.glob('../photos/**/*.{jpg,jpeg,png,webp,JPG,JPEG,PNG,WEBP}', { eager: true });
+const nice = (s) => s.replace(/\.[^.]+$/, '').replace(/^\d+[-_ ]*/, '').replace(/[-_]+/g, ' ').trim();
+const entries = Object.entries(files).sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }));
+
+// Colour buckets: name, hue range in degrees, swatch colour.
+const BUCKETS = [
+  ['Red', 345, 15, '#d63a3a'], ['Orange', 15, 45, '#e8873a'], ['Yellow', 45, 70, '#e8d03a'],
+  ['Green', 70, 160, '#58b85a'], ['Teal', 160, 200, '#3ab5a8'], ['Blue', 200, 260, '#3a78d6'],
+  ['Purple', 260, 300, '#7a4fd6'], ['Pink', 300, 345, '#d64fa8'], ['Neutral', 0, 0, '#9a9a98'],
+];
+const toHsl = (r, g, b) => {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn;
+  let h = 0, s = 0;
+  if (d) {
+    s = d / (1 - Math.abs(2 * l - 1));
+    if (mx === r) h = ((g - b) / d) % 6; else if (mx === g) h = (b - r) / d + 2; else h = (r - g) / d + 4;
+    h *= 60; if (h < 0) h += 360;
+  }
+  return [h, s, l];
+};
+const toHex = (h, s, l) => {
+  const a = s * Math.min(l, 1 - l);
+  const f = (n) => { const k = (n + h / 30) % 12; const c = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); return ('0' + Math.round(c * 255).toString(16)).slice(-2); };
+  return '#' + f(0) + f(8) + f(4);
+};
+
+// Dominant colour: hue averaged on the colour wheel, weighted by how vivid each pixel is.
+async function dominant(file) {
+  try {
+    const { data, info } = await sharp(file).resize(48, 48, { fit: 'cover' }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+    let cx = 0, sy = 0, w = 0, ls = 0, n = 0;
+    for (let i = 0; i < data.length; i += info.channels) {
+      const [h, s, l] = toHsl(data[i], data[i + 1], data[i + 2]);
+      const wt = s * (1 - Math.abs(2 * l - 1));
+      cx += Math.cos(h * Math.PI / 180) * wt; sy += Math.sin(h * Math.PI / 180) * wt;
+      w += wt; ls += l; n++;
+    }
+    const avg = w / n, l = ls / n;
+    if (avg < 0.06) return { neutral: true, h: 0, l, hex: toHex(0, 0, l) };
+    const h = (Math.atan2(sy, cx) * 180 / Math.PI + 360) % 360;
+    return { neutral: false, h, l: 0.5, hex: toHex(h, Math.min(1, avg * 2.2 + 0.35), 0.52) };
+  } catch {
+    return { neutral: true, h: 0, l: 0.5, hex: '#808080' };
+  }
+}
+const bucketOf = (c) => {
+  if (c.neutral) return 8;
+  for (let k = 0; k < 8; k++) {
+    const a = BUCKETS[k][1], b = BUCKETS[k][2];
+    if (a > b ? (c.h >= a || c.h < b) : (c.h >= a && c.h < b)) return k;
+  }
+  return 8;
+};
+
+const photos = await Promise.all(entries.map(async ([key, mod]) => {
+  const abs = path.join(process.cwd(), 'src', key.replace('../', ''));
+  const c = await dominant(abs);
+  const thumb = await getImage({ src: mod.default, width: 1000, format: 'webp' });
+  const full = await getImage({ src: mod.default, width: 2200, format: 'webp' });
+  return {
+    t: nice(key.split('/').pop()), th: thumb.src, f: full.src,
+    r: Math.round((thumb.attributes.width / thumb.attributes.height) * 1000) / 1000,
+    n: c.neutral, h: Math.round(c.h), l: Math.round(c.l * 1000) / 1000, x: c.hex, b: bucketOf(c),
+  };
+}));
+const data = { buckets: BUCKETS.map((b) => ({ n: b[0], c: b[3] })), photos };
+---
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>By colour · Eli Reeder Photography</title>
+  <meta name="description" content={SUBTITLE} />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Audiowide&family=Newsreader:ital,opsz,wght@0,6..72,400;1,6..72,400&family=Figtree:wght@400;500&display=swap" />
+</head>
+<body>
+  <header>
+    <a class="back" href="/">&larr; Gallery</a>
+    <h1>{TITLE}</h1>
+    <p class="sub">{SUBTITLE}</p>
+    <div class="rainbow"></div>
+    <div class="modes" role="group" aria-label="View">
+      <button data-v="rainbow" aria-pressed="true">Rainbow</button>
+      <button data-v="groups" aria-pressed="false">Groups</button>
+    </div>
+    <div class="bar" id="chips" role="group" aria-label="Filter by colour"></div>
+  </header>
+
+  <main id="m"></main>
+
+  <div id="lb" role="dialog" aria-modal="true" aria-label="Photo viewer">
+    <button id="close" aria-label="Close">Close</button>
+    <button class="nav" id="prev" aria-label="Previous">&lsaquo;</button>
+    <img id="lbimg" alt="" />
+    <p id="lbcap"></p>
+    <button class="nav" id="next" aria-label="Next">&rsaquo;</button>
+  </div>
+
+  <script type="application/json" id="colour-data" set:html={JSON.stringify(data)} />
+
+  <script>
+    const DATA = JSON.parse(document.getElementById('colour-data').textContent);
+    const B = DATA.buckets, P = DATA.photos;
+    const m = document.getElementById('m');
+    const chips = document.getElementById('chips');
+    const lb = document.getElementById('lb');
+    const lbimg = document.getElementById('lbimg');
+    const lbcap = document.getElementById('lbcap');
+    let view = 'rainbow', filt = -1, shown = [], cur = 0;
+
+    const hueKey = (p) => (p.h + 15) % 360;
+    const byColour = (a, b) => (a.n !== b.n ? (a.n ? 1 : -1) : a.n ? b.l - a.l : hueKey(a) - hueKey(b));
+
+    const showViewer = () => {
+      const p = shown[cur];
+      lbimg.src = p.f; lbimg.alt = p.t;
+      lbcap.innerHTML = '<i></i><span></span>';
+      lbcap.firstChild.style.background = p.x;
+      lbcap.lastChild.textContent = p.t + '  ' + p.x.toUpperCase() + '  (' + (cur + 1) + '/' + shown.length + ')';
+    };
+    const step = (d) => { cur = (cur + d + shown.length) % shown.length; showViewer(); };
+    const closeViewer = () => lb.classList.remove('on');
+
+    const tile = (p, cw, rh) => {
+      const b = document.createElement('button');
+      b.className = 'ph'; b.type = 'button';
+      b.style.gridColumn = 'span ' + cw; b.style.gridRow = 'span ' + rh;
+      b.setAttribute('aria-label', 'Open ' + p.t);
+      const im = document.createElement('img'); im.src = p.th; im.alt = p.t; im.loading = 'lazy'; im.decoding = 'async';
+      const d = document.createElement('span'); d.className = 'dot'; d.style.background = p.x;
+      const h = document.createElement('span'); h.className = 'hx'; h.textContent = p.x.toUpperCase();
+      b.append(im, d, h);
+      b.onclick = () => { cur = shown.indexOf(p); showViewer(); lb.classList.add('on'); document.getElementById('close').focus(); };
+      return b;
+    };
+    const grid = (list, feature) => {
+      const g = document.createElement('div'); g.className = 'puzzle';
+      list.forEach((p, i) => {
+        const land = p.r >= 1.15, f = feature && i % 7 === 0;
+        g.appendChild(tile(p, land ? (f ? 4 : 2) : (f ? 2 : 1), f ? 2 : 1));
+      });
+      return g;
+    };
+
+    const render = () => {
+      m.innerHTML = '';
+      const list = P.filter((p) => filt < 0 || p.b === filt);
+      if (!list.length) { m.innerHTML = '<p class="empty">No photos in this colour yet.</p>'; shown = []; return; }
+      if (view === 'rainbow') {
+        shown = list.slice().sort(byColour);
+        m.appendChild(grid(shown, true));
+      } else {
+        shown = [];
+        B.forEach((bk, k) => {
+          const g = list.filter((p) => p.b === k).sort(byColour);
+          if (!g.length) return;
+          shown.push(...g);
+          const sec = document.createElement('section'); sec.className = 'sec';
+          const h = document.createElement('h2');
+          h.innerHTML = '<i></i><span></span><small></small>';
+          h.firstChild.style.background = bk.c; h.children[1].textContent = bk.n;
+          h.lastChild.textContent = g.length + (g.length === 1 ? ' photo' : ' photos');
+          sec.append(h, grid(g, false)); m.appendChild(sec);
+        });
+      }
+    };
+
+    const chipBar = () => {
+      chips.innerHTML = '';
+      const all = document.createElement('button');
+      all.type = 'button'; all.textContent = 'All ' + P.length; all.setAttribute('aria-pressed', String(filt < 0));
+      all.onclick = () => { filt = -1; chipBar(); render(); };
+      chips.appendChild(all);
+      B.forEach((bk, k) => {
+        const n = P.filter((p) => p.b === k).length;
+        if (!n) return;
+        const c = document.createElement('button');
+        c.type = 'button'; c.className = 'chip'; c.setAttribute('aria-pressed', String(filt === k));
+        c.innerHTML = '<i></i><span></span><b></b>';
+        c.firstChild.style.background = bk.c; c.children[1].textContent = bk.n; c.lastChild.textContent = n;
+        c.onclick = () => { filt = filt === k ? -1 : k; chipBar(); render(); };
+        chips.appendChild(c);
+      });
+    };
+
+    document.querySelectorAll('[data-v]').forEach((t) => t.addEventListener('click', () => {
+      view = t.dataset.v;
+      document.querySelectorAll('[data-v]').forEach((x) => x.setAttribute('aria-pressed', String(x === t)));
+      render();
+    }));
+    document.getElementById('close').onclick = closeViewer;
+    document.getElementById('prev').onclick = () => step(-1);
+    document.getElementById('next').onclick = () => step(1);
+    lb.addEventListener('click', (e) => { if (e.target === lb) closeViewer(); });
+    document.addEventListener('keydown', (e) => {
+      if (!lb.classList.contains('on')) return;
+      if (e.key === 'Escape') closeViewer();
+      if (e.key === 'ArrowLeft') step(-1);
+      if (e.key === 'ArrowRight') step(1);
+    });
+
+    chipBar();
+    render();
+  </script>
+
+  <style is:global>
+    :root{--bg:#2a2f33;--surface:#343a3f;--text:#e9e9e6;--muted:#9aa2a8;--accent:#8fc7bd;--line:#454d54}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font:400 16px/1.5 Figtree,system-ui,sans-serif}
+    header{padding:40px 24px 8px;max-width:1200px;margin:0 auto;text-align:center}
+    .back{display:inline-block;color:var(--muted);text-decoration:none;font-size:14px;padding:6px 16px;border:1px solid var(--line);border-radius:999px}
+    .back:hover{color:var(--accent);border-color:var(--accent)}
+    h1{font:400 clamp(34px,7vw,64px)/1 Audiowide,system-ui,sans-serif;margin:14px 0 0;letter-spacing:.02em}
+    .sub{color:var(--muted);margin:10px auto 0;max-width:50ch}
+    .rainbow{height:6px;border-radius:3px;max-width:520px;margin:14px auto 0;background:linear-gradient(90deg,#d63a3a,#e8873a,#e8d03a,#58b85a,#3ab5a8,#3a78d6,#7a4fd6,#d64fa8)}
+    .modes{display:flex;gap:8px;justify-content:center;margin:14px 0 4px}
+    .bar{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:14px auto 8px;max-width:1100px;padding:0 12px}
+    button{font:500 14px Figtree,sans-serif;color:var(--text);background:transparent;border:1px solid var(--line);border-radius:999px;padding:7px 14px;cursor:pointer}
+    button:hover{border-color:var(--accent)}
+    button[aria-pressed="true"]{background:var(--accent);color:#0c1517;border-color:var(--accent)}
+    button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+    .chip{display:inline-flex;align-items:center;gap:8px}
+    .chip i{width:14px;height:14px;border-radius:50%;display:block;border:1px solid rgba(255,255,255,.25)}
+    .chip b{font-weight:500;opacity:.7}
+    main{max-width:1400px;margin:0 auto;padding:18px 12px 70px;container-type:inline-size}
+    .sec h2{display:flex;align-items:center;gap:10px;font:italic 400 26px/1.2 Newsreader,Georgia,serif;margin:30px 4px 12px}
+    .sec h2 i{width:18px;height:18px;border-radius:50%;display:block;border:1px solid rgba(255,255,255,.25)}
+    .sec h2 small{font:400 14px Figtree,sans-serif;color:var(--muted)}
+    .puzzle{--cols:6;--gap:6px;display:grid;grid-template-columns:repeat(var(--cols),minmax(0,1fr));grid-auto-rows:calc((100cqw - (var(--cols) - 1) * var(--gap)) / var(--cols) * 1.3);grid-auto-flow:dense;gap:var(--gap)}
+    .ph{position:relative;display:block;width:100%;height:100%;padding:0;border:0;border-radius:2px;overflow:hidden;background:var(--surface);cursor:zoom-in}
+    .ph img{display:block;width:100%;height:100%;object-fit:cover}
+    .dot{position:absolute;left:8px;bottom:8px;width:16px;height:16px;border-radius:50%;border:2px solid rgba(255,255,255,.85);box-shadow:0 1px 4px rgba(0,0,0,.4)}
+    .hx{position:absolute;left:30px;bottom:8px;color:#fff;font:500 12px Figtree,sans-serif;letter-spacing:.04em;text-shadow:0 1px 3px rgba(0,0,0,.7);opacity:0;transition:opacity .2s}
+    .ph:hover .hx,.ph:focus-visible .hx{opacity:1}
+    .empty{color:var(--muted);text-align:center;padding:40px}
+    #lb{position:fixed;inset:0;background:rgba(30,34,37,.97);display:none;flex-direction:column;align-items:center;justify-content:center;padding:24px;z-index:10}
+    #lb.on{display:flex}
+    #lb img{max-width:100%;max-height:80vh;border-radius:2px}
+    #lbcap{font:italic 400 20px Newsreader,serif;margin:14px 0 0;text-align:center;display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap}
+    #lbcap i{width:18px;height:18px;border-radius:50%;display:block;border:1px solid rgba(255,255,255,.3)}
+    .nav{position:absolute;top:50%;transform:translateY(-50%);font-size:22px;width:44px;height:44px;padding:0}
+    #prev{left:12px}#next{right:12px}#close{position:absolute;top:14px;right:14px}
+    @media (max-width:700px){.puzzle{--cols:4;--gap:4px}main{padding:14px 6px 50px}}
+    @media (prefers-reduced-motion:reduce){.hx{transition:none}}
+  </style>
+</body>
+</html>
